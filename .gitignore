@@ -1,0 +1,4 @@
+node_modules
+dist
+server/data/database.json
+.DS_Store
