@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { dateTime } from '../utils/format.js';
+
+const POLL_INTERVAL_MS = 5000;
 
 export default function MessagesPage() {
   const [searchParams] = useSearchParams();
@@ -10,23 +12,51 @@ export default function MessagesPage() {
   const [thread, setThread] = useState(null);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
+  const threadRef = useRef(null);
+  const previousMessageCountRef = useRef(0);
+
+  async function loadConversations() {
+    try {
+      const data = await api.get('/messages/conversations');
+      setConversations(data.conversations || []);
+      if (!activeConversationId && data.conversations?.length) {
+        setActiveConversationId(data.conversations[0].id);
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function loadThread(conversationId) {
+    try {
+      const data = await api.get(`/messages/conversations/${conversationId}`);
+      setThread(data.conversation);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
 
   useEffect(() => {
-    let mounted = true;
-    api.get('/messages/conversations').then((data) => {
-      if (!mounted) return;
-      setConversations(data.conversations || []);
-      if (!activeConversationId && data.conversations?.length) setActiveConversationId(data.conversations[0].id);
-    }).catch((err) => { if (mounted) setError(err.message); });
-    return () => { mounted = false; };
+    loadConversations();
+    const intervalId = setInterval(loadConversations, POLL_INTERVAL_MS);
+    return () => clearInterval(intervalId);
   }, []);
 
   useEffect(() => {
-    if (!activeConversationId) return;
-    let mounted = true;
-    api.get(`/messages/conversations/${activeConversationId}`).then((data) => { if (mounted) setThread(data.conversation); }).catch((err) => { if (mounted) setError(err.message); });
-    return () => { mounted = false; };
+    if (!activeConversationId) return undefined;
+    previousMessageCountRef.current = 0;
+    loadThread(activeConversationId);
+    const intervalId = setInterval(() => loadThread(activeConversationId), POLL_INTERVAL_MS);
+    return () => clearInterval(intervalId);
   }, [activeConversationId]);
+
+  useEffect(() => {
+    const messageCount = thread?.messages?.length || 0;
+    if (messageCount > previousMessageCountRef.current && threadRef.current) {
+      threadRef.current.scrollTop = threadRef.current.scrollHeight;
+    }
+    previousMessageCountRef.current = messageCount;
+  }, [thread]);
 
   async function handleSend(event) {
     event.preventDefault();
@@ -34,8 +64,7 @@ export default function MessagesPage() {
     try {
       await api.post(`/messages/conversations/${activeConversationId}`, { body: draft.trim() });
       setDraft('');
-      const data = await api.get(`/messages/conversations/${activeConversationId}`);
-      setThread(data.conversation);
+      await loadThread(activeConversationId);
     } catch (err) { setError(err.message); }
   }
 
@@ -51,7 +80,7 @@ export default function MessagesPage() {
         </aside>
         <section className="panel page-stack">
           <h2>{thread?.listingTitle || 'Select a conversation'}</h2>
-          <div className="message-thread">
+          <div className="message-thread" ref={threadRef}>
             {!thread?.messages?.length ? <p className="muted">No messages yet.</p> : null}
             {thread?.messages?.map((message) => <div key={message.id} className="message-bubble"><strong>{message.senderName}</strong><span className="muted">{dateTime(message.createdAt)}</span><p>{message.body}</p></div>)}
           </div>
