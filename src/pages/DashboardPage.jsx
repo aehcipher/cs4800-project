@@ -38,7 +38,7 @@ export default function DashboardPage() {
           <div className="panel page-stack">
             <div className="section-heading-row"><h2>My listings</h2><Link className="solid-button small-button" to="/create-listing">New listing</Link></div>
             {!myListings.length ? <p className="muted">You have not published any listings yet.</p> : null}
-            {myListings.map((listing) => <div key={listing.id} className="row-card"><div><strong>{listing.title}</strong><p className="muted">{listing.category} · {listing.campus} · Deposit {money(listing.depositAmount)}</p></div><div className="row-card-actions"><span className="chip">{listing.status}</span><Link className="ghost-button" to={`/listings/${listing.id}`}>Open</Link></div></div>)}
+            {myListings.map((listing) => <div key={listing.id} className="row-card"><div><strong>{listing.title}</strong><p className="muted">{listing.category} · {listing.campus} · Deposit {money(listing.depositAmount)}</p></div><div className="row-card-actions"><span className="chip">{listing.status}</span><Link className="ghost-button" to={`/listings/${listing.id}`}>Open</Link><Link className="ghost-button" to={`/listings/${listing.id}/edit`}>Edit</Link></div></div>)}
           </div>
         </>
       ) : null}

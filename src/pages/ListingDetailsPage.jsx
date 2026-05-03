@@ -81,7 +81,15 @@ export default function ListingDetailsPage() {
               <button className="solid-button">Create booking request</button>
               {createdBooking ? <Link className="ghost-button" to={`/bookings/${createdBooking.id}`}>Open booking details</Link> : null}
             </form>
-          ) : <div className="panel">You own this listing. Use the dashboard to review activity and earnings.</div>}
+          ) : (
+            <div className="panel page-stack compact-gap">
+              <p>You own this listing. Use the dashboard to review activity and earnings.</p>
+              <div className="button-row">
+                <Link className="solid-button small-button" to={`/listings/${listing.id}/edit`}>Edit listing</Link>
+                <Link className="ghost-button" to="/dashboard">Open dashboard</Link>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

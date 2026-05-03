@@ -5,6 +5,7 @@ import HomePage from './pages/HomePage.jsx';
 import BrowsePage from './pages/BrowsePage.jsx';
 import ListingDetailsPage from './pages/ListingDetailsPage.jsx';
 import CreateListingPage from './pages/CreateListingPage.jsx';
+import EditListingPage from './pages/EditListingPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import MyBookingsPage from './pages/MyBookingsPage.jsx';
 import BookingDetailsPage from './pages/BookingDetailsPage.jsx';
@@ -47,6 +48,7 @@ export default function App() {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/create-listing" element={<ProtectedRoute><CreateListingPage /></ProtectedRoute>} />
+        <Route path="/listings/:listingId/edit" element={<ProtectedRoute><EditListingPage /></ProtectedRoute>} />
         <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
         <Route path="/bookings" element={<ProtectedRoute><MyBookingsPage /></ProtectedRoute>} />
         <Route path="/bookings/:bookingId" element={<ProtectedRoute><BookingDetailsPage /></ProtectedRoute>} />

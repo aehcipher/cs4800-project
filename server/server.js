@@ -245,6 +245,55 @@ app.post('/api/listings', requireAuth, (req, res) => {
   }
 });
 
+app.patch('/api/listings/:listingId', requireAuth, (req, res) => {
+  try {
+    const database = readDatabase();
+    const listing = database.listings.find((item) => item.id === req.params.listingId);
+    if (!listing) throw new Error('Listing not found.');
+    if (listing.ownerId !== req.auth.user.id && req.auth.user.role !== 'admin') throw new Error('You do not have permission to edit this listing.');
+    const payload = req.body || {};
+    if (payload.title !== undefined) listing.title = String(payload.title).trim() || listing.title;
+    if (payload.description !== undefined) listing.description = String(payload.description).trim() || listing.description;
+    if (payload.category !== undefined) listing.category = String(payload.category).trim() || listing.category;
+    if (payload.campus !== undefined) listing.campus = String(payload.campus).trim() || listing.campus;
+    if (Array.isArray(payload.images)) listing.images = payload.images;
+    if (payload.pricing && typeof payload.pricing === 'object') {
+      listing.pricing = {
+        hourly: Number(payload.pricing.hourly ?? listing.pricing.hourly ?? 0),
+        daily: Number(payload.pricing.daily ?? listing.pricing.daily ?? 0),
+        weekly: Number(payload.pricing.weekly ?? listing.pricing.weekly ?? 0)
+      };
+    }
+    if (payload.depositAmount !== undefined) listing.depositAmount = Number(payload.depositAmount || 0);
+    if (payload.pickupInstructions !== undefined) listing.pickupInstructions = String(payload.pickupInstructions);
+    if (payload.dropoffInstructions !== undefined) listing.dropoffInstructions = String(payload.dropoffInstructions);
+    if (Array.isArray(payload.availability)) listing.availability = payload.availability;
+    if (payload.status && ['active', 'paused', 'removed'].includes(payload.status)) listing.status = payload.status;
+    listing.updatedAt = nowIso();
+    writeDatabase(database);
+    res.json({ listing: attachListingOwner(database, listing) });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/listings/:listingId', requireAuth, (req, res) => {
+  try {
+    const database = readDatabase();
+    const listing = database.listings.find((item) => item.id === req.params.listingId);
+    if (!listing) throw new Error('Listing not found.');
+    if (listing.ownerId !== req.auth.user.id && req.auth.user.role !== 'admin') throw new Error('You do not have permission to remove this listing.');
+    const hasOpenBookings = database.bookings.some((booking) => booking.listingId === listing.id && ['requested', 'paid', 'active', 'disputed'].includes(booking.status));
+    if (hasOpenBookings) throw new Error('Cannot remove a listing with open bookings. Resolve them first.');
+    listing.status = 'removed';
+    listing.updatedAt = nowIso();
+    writeDatabase(database);
+    res.json({ ok: true, listing });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 app.get('/api/bookings', requireAuth, (req, res) => {
   const database = readDatabase();
   const bookings = database.bookings.filter((booking) => booking.renterId === req.auth.user.id || booking.listerId === req.auth.user.id || req.auth.user.role === 'admin').map((booking) => getBookingView(database, booking));
