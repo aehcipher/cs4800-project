@@ -2,14 +2,14 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
 const navItems = [
-  ['/', 'Home'],
-  ['/browse', 'Browse'],
-  ['/create-listing', 'List an Item'],
-  ['/dashboard', 'Dashboard'],
-  ['/bookings', 'Bookings'],
-  ['/messages', 'Messages'],
-  ['/notifications', 'Notifications'],
-  ['/disputes', 'Disputes']
+  { to: '/', label: 'Home', requiresAuth: false },
+  { to: '/browse', label: 'Browse', requiresAuth: false },
+  { to: '/create-listing', label: 'List an Item', requiresAuth: true },
+  { to: '/dashboard', label: 'Dashboard', requiresAuth: true },
+  { to: '/bookings', label: 'Bookings', requiresAuth: true },
+  { to: '/messages', label: 'Messages', requiresAuth: true },
+  { to: '/notifications', label: 'Notifications', requiresAuth: true },
+  { to: '/disputes', label: 'Disputes', requiresAuth: true }
 ];
 
 export default function Layout() {
@@ -21,13 +21,15 @@ export default function Layout() {
     navigate('/');
   }
 
+  const visibleNavItems = navItems.filter((item) => !item.requiresAuth || isAuthenticated);
+
   return (
     <div className="app-shell">
       <header className="top-header">
         <div className="container header-inner">
           <Link className="brand" to="/">Rent.it</Link>
           <nav className="nav-links">
-            {navItems.map(([to, label]) => (
+            {visibleNavItems.map(({ to, label }) => (
               <NavLink key={to} to={to} className={({ isActive }) => `nav-link ${isActive ? 'active-link' : ''}`}>{label}</NavLink>
             ))}
             {user?.role === 'admin' ? <NavLink to="/admin" className={({ isActive }) => `nav-link ${isActive ? 'active-link' : ''}`}>Admin</NavLink> : null}
