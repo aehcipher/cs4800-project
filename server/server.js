@@ -7,6 +7,15 @@ const config = require('./config');
 const { databasePath, ensureDatabase, readDatabase, writeDatabase } = require('./data/storage');
 const { makeSeedDatabase } = require('./data/seedData');
 const { average, calculateQuantity, generateId, hashPassword, nowIso, sanitizeUser, verifyPassword } = require('./utils/helpers');
+const {
+  normalizeImageUrls,
+  normalizePricing,
+  normalizeAvailability,
+  canPublicViewListing,
+  bookingFitsAvailability,
+  LISTER_EDITABLE_STATUSES,
+  ADMIN_EDITABLE_STATUSES
+} = require('./services/listings');
 
 ensureDatabase();
 
@@ -84,6 +93,14 @@ function getSessionFromHeader(req) {
   return header.startsWith('Bearer ') ? header.slice(7) : '';
 }
 
+function getOptionalUser(req, database) {
+  const token = getSessionFromHeader(req);
+  if (!token) return null;
+  const session = database.sessions.find((item) => item.token === token);
+  if (!session) return null;
+  return database.users.find((item) => item.id === session.userId) || null;
+}
+
 function requireAuth(req, res, next) {
   const token = getSessionFromHeader(req);
   if (!token) return res.status(401).json({ error: 'Authentication required.' });
@@ -119,6 +136,8 @@ function overlaps(startA, endA, startB, endB) {
 function validatePassword(password) {
   return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/.test(password || '');
 }
+
+
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', databasePath });
@@ -218,12 +237,13 @@ app.get('/api/listings/mine', requireAuth, (req, res) => {
   const listings = database.listings.filter((listing) => listing.ownerId === req.auth.user.id).map((listing) => attachListingOwner(database, listing));
   res.json({ listings });
 });
-
 app.get('/api/listings/:listingId', (req, res) => {
   try {
     const database = readDatabase();
     const listing = database.listings.find((item) => item.id === req.params.listingId);
     if (!listing) throw new Error('Listing not found.');
+    const viewer = getOptionalUser(req, database);
+    if (!canPublicViewListing(listing, viewer)) throw new Error('Listing not found.');
     res.json({ listing: attachListingOwner(database, listing) });
   } catch (error) {
     res.status(404).json({ error: error.message });
@@ -233,12 +253,35 @@ app.get('/api/listings/:listingId', (req, res) => {
 app.post('/api/listings', requireAuth, (req, res) => {
   try {
     const payload = req.body || {};
-    if (!payload.title || !payload.description || !payload.category || !payload.campus) throw new Error('Title, description, category, and campus are required.');
+
+    if (!payload.title || !payload.description || !payload.category || !payload.campus) {
+      throw new Error('Title, description, category, and campus are required.');
+    }
+
     const database = readDatabase();
     const timestamp = nowIso();
-    const listing = { id: generateId('lst'), ownerId: req.auth.user.id, title: payload.title, description: payload.description, category: payload.category, campus: payload.campus, images: Array.isArray(payload.images) ? payload.images : [], pricing: { hourly: Number(payload.pricing?.hourly || 0), daily: Number(payload.pricing?.daily || 0), weekly: Number(payload.pricing?.weekly || 0) }, depositAmount: Number(payload.depositAmount || 0), pickupInstructions: payload.pickupInstructions || 'Coordinate pickup through in-app messaging.', dropoffInstructions: payload.dropoffInstructions || 'Return to the agreed campus meetup location.', availability: Array.isArray(payload.availability) ? payload.availability : [], status: 'active', createdAt: timestamp, updatedAt: timestamp };
+
+    const listing = {
+      id: generateId('lst'),
+      ownerId: req.auth.user.id,
+      title: String(payload.title).trim(),
+      description: String(payload.description).trim(),
+      category: String(payload.category).trim(),
+      campus: String(payload.campus).trim(),
+      images: normalizeImageUrls(payload.images),
+      pricing: normalizePricing(payload.pricing),
+      depositAmount: Number(payload.depositAmount || 0),
+      pickupInstructions: String(payload.pickupInstructions || 'Coordinate pickup through in-app messaging.').trim(),
+      dropoffInstructions: String(payload.dropoffInstructions || 'Return to the agreed campus meetup location.').trim(),
+      availability: normalizeAvailability(payload.availability),
+      status: 'active',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+
     database.listings.unshift(listing);
     writeDatabase(database);
+
     res.status(201).json({ listing: attachListingOwner(database, listing) });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -249,28 +292,42 @@ app.patch('/api/listings/:listingId', requireAuth, (req, res) => {
   try {
     const database = readDatabase();
     const listing = database.listings.find((item) => item.id === req.params.listingId);
+
     if (!listing) throw new Error('Listing not found.');
-    if (listing.ownerId !== req.auth.user.id && req.auth.user.role !== 'admin') throw new Error('You do not have permission to edit this listing.');
-    const payload = req.body || {};
-    if (payload.title !== undefined) listing.title = String(payload.title).trim() || listing.title;
-    if (payload.description !== undefined) listing.description = String(payload.description).trim() || listing.description;
-    if (payload.category !== undefined) listing.category = String(payload.category).trim() || listing.category;
-    if (payload.campus !== undefined) listing.campus = String(payload.campus).trim() || listing.campus;
-    if (Array.isArray(payload.images)) listing.images = payload.images;
-    if (payload.pricing && typeof payload.pricing === 'object') {
-      listing.pricing = {
-        hourly: Number(payload.pricing.hourly ?? listing.pricing.hourly ?? 0),
-        daily: Number(payload.pricing.daily ?? listing.pricing.daily ?? 0),
-        weekly: Number(payload.pricing.weekly ?? listing.pricing.weekly ?? 0)
-      };
+
+    if (listing.ownerId !== req.auth.user.id && req.auth.user.role !== 'admin') {
+      throw new Error('You do not have permission to edit this listing.');
     }
+
+    const payload = req.body || {};
+
+    if (payload.title !== undefined) listing.title = String(payload.title).trim();
+    if (payload.description !== undefined) listing.description = String(payload.description).trim();
+    if (payload.category !== undefined) listing.category = String(payload.category).trim();
+    if (payload.campus !== undefined) listing.campus = String(payload.campus).trim();
+    if (Array.isArray(payload.images)) listing.images = normalizeImageUrls(payload.images);
+    if (payload.pricing && typeof payload.pricing === 'object') listing.pricing = normalizePricing(payload.pricing);
     if (payload.depositAmount !== undefined) listing.depositAmount = Number(payload.depositAmount || 0);
-    if (payload.pickupInstructions !== undefined) listing.pickupInstructions = String(payload.pickupInstructions);
-    if (payload.dropoffInstructions !== undefined) listing.dropoffInstructions = String(payload.dropoffInstructions);
-    if (Array.isArray(payload.availability)) listing.availability = payload.availability;
-    if (payload.status && ['active', 'paused', 'removed'].includes(payload.status)) listing.status = payload.status;
+    if (payload.pickupInstructions !== undefined) listing.pickupInstructions = String(payload.pickupInstructions).trim();
+    if (payload.dropoffInstructions !== undefined) listing.dropoffInstructions = String(payload.dropoffInstructions).trim();
+    if (Array.isArray(payload.availability)) listing.availability = normalizeAvailability(payload.availability);
+
+    if (payload.status !== undefined) {
+      const requestedStatus = String(payload.status).trim();
+      const allowedStatuses = req.auth.user.role === 'admin'
+        ? ADMIN_EDITABLE_STATUSES
+        : LISTER_EDITABLE_STATUSES;
+
+      if (!allowedStatuses.has(requestedStatus)) {
+        throw new Error('You cannot set that listing status.');
+      }
+
+      listing.status = requestedStatus;
+    }
+
     listing.updatedAt = nowIso();
     writeDatabase(database);
+
     res.json({ listing: attachListingOwner(database, listing) });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -323,6 +380,9 @@ app.post('/api/bookings', requireAuth, async (req, res) => {
     if (new Date(payload.startAt).getTime() >= new Date(payload.endAt).getTime()) throw new Error('End time must be after start time.');
     const conflicting = database.bookings.find((booking) => booking.listingId === listing.id && ['requested', 'paid', 'active'].includes(booking.status) && overlaps(payload.startAt, payload.endAt, booking.startAt, booking.endAt));
     if (conflicting) throw new Error('This listing already has a booking in that time range.');
+    if (!bookingFitsAvailability(listing, payload.startAt, payload.endAt)) {
+    throw new Error('Requested booking time is outside this listing availability.');
+    }
     const pricingUnit = payload.pricingUnit || 'daily';
     const quantity = calculateQuantity(payload.startAt, payload.endAt, pricingUnit);
     const rate = Number(listing.pricing?.[pricingUnit] || listing.pricing?.daily || listing.pricing?.hourly || 0);
@@ -564,8 +624,18 @@ app.patch('/api/admin/listings/:listingId', requireAuth, requireAdmin, (req, res
   try {
     const database = readDatabase();
     const listing = database.listings.find((item) => item.id === req.params.listingId);
+
     if (!listing) throw new Error('Listing not found.');
-    listing.status = req.body?.status || listing.status;
+
+    const requestedStatus = String(req.body?.status || '').trim();
+
+    if (!ADMIN_EDITABLE_STATUSES.has(requestedStatus)) {
+      throw new Error('Invalid listing status.');
+    }
+
+    listing.status = requestedStatus;
+    listing.updatedAt = nowIso();
+
     writeDatabase(database);
     res.json({ listing });
   } catch (error) {
@@ -617,3 +687,7 @@ app.get('*', (req, res) => {
 app.listen(config.port, () => {
   console.log(`Student rental API listening on http://localhost:${config.port}`);
 });
+
+
+
+
