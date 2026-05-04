@@ -444,6 +444,79 @@ app.post('/api/bookings/:bookingId/complete', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/api/bookings/:bookingId/decline', requireAuth, async (req, res) => {
+  try {
+    const database = readDatabase();
+    const booking = database.bookings.find((item) => item.id === req.params.bookingId);
+    if (!booking) throw new Error('Booking not found.');
+    if (booking.listerId !== req.auth.user.id && req.auth.user.role !== 'admin') throw new Error('Only the lister can decline this booking.');
+    if (booking.status !== 'requested') throw new Error('Only pending booking requests can be declined.');
+    booking.status = 'declined';
+    booking.updatedAt = nowIso();
+    const reason = String(req.body?.reason || '').trim();
+    await notifyUser(database, {
+      userId: booking.renterId,
+      type: 'booking',
+      title: 'Booking request declined',
+      message: reason ? `The lister declined your request: ${reason}` : 'The lister declined your booking request.',
+      metadata: { bookingId: booking.id }
+    });
+    writeDatabase(database);
+    res.json({ booking: getBookingView(database, booking) });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/bookings/:bookingId/cancel', requireAuth, async (req, res) => {
+  try {
+    const database = readDatabase();
+    const booking = database.bookings.find((item) => item.id === req.params.bookingId);
+    if (!booking) throw new Error('Booking not found.');
+    if (booking.renterId !== req.auth.user.id && req.auth.user.role !== 'admin') throw new Error('Only the renter can cancel this booking.');
+    if (!['requested', 'paid'].includes(booking.status)) throw new Error('Only pending or paid bookings can be cancelled.');
+    const wasPaid = booking.status === 'paid';
+    booking.status = 'cancelled';
+    booking.updatedAt = nowIso();
+    if (wasPaid) {
+      database.payments.unshift({
+        id: generateId('pay'),
+        bookingId: booking.id,
+        amount: booking.totalAmount,
+        currency: 'usd',
+        provider: 'mock',
+        providerReference: generateId('refund'),
+        kind: 'refund',
+        status: 'succeeded',
+        createdAt: nowIso()
+      });
+      const escrow = database.escrows.find((item) => item.bookingId === booking.id && item.status === 'held');
+      if (escrow) { escrow.status = 'refunded'; escrow.refundedAt = nowIso(); }
+    }
+    const reason = String(req.body?.reason || '').trim();
+    await notifyUser(database, {
+      userId: booking.listerId,
+      type: 'booking',
+      title: 'Booking cancelled',
+      message: reason ? `The renter cancelled the booking: ${reason}` : 'The renter cancelled the booking.',
+      metadata: { bookingId: booking.id }
+    });
+    if (wasPaid) {
+      await notifyUser(database, {
+        userId: booking.renterId,
+        type: 'payment',
+        title: 'Refund issued',
+        message: `Your booking was cancelled and ${booking.totalAmount.toFixed(2)} was refunded.`,
+        metadata: { bookingId: booking.id }
+      });
+    }
+    writeDatabase(database);
+    res.json({ booking: getBookingView(database, booking) });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 app.post('/api/condition-reports/:bookingId', requireAuth, async (req, res) => {
   try {
     const database = readDatabase();
@@ -578,6 +651,20 @@ app.post('/api/notifications/:notificationId/read', requireAuth, (req, res) => {
   } catch (error) {
     res.status(404).json({ error: error.message });
   }
+});
+
+app.post('/api/notifications/read-all', requireAuth, (req, res) => {
+  const database = readDatabase();
+  const timestamp = nowIso();
+  let updated = 0;
+  for (const notification of database.notifications) {
+    if (notification.userId === req.auth.user.id && !notification.readAt) {
+      notification.readAt = timestamp;
+      updated += 1;
+    }
+  }
+  if (updated > 0) writeDatabase(database);
+  res.json({ ok: true, updated });
 });
 
 app.get('/api/dashboard/earnings', requireAuth, (req, res) => {

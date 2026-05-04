@@ -21,6 +21,10 @@ export default function BookingDetailsPage() {
 
   useEffect(() => { loadBooking().catch((err) => setError(err.message)); }, [bookingId]);
   const canComplete = useMemo(() => booking && ['paid', 'active'].includes(booking.status), [booking]);
+  const isLister = booking && user && booking.listerId === user.id;
+  const isRenter = booking && user && booking.renterId === user.id;
+  const canDecline = isLister && booking?.status === 'requested';
+  const canCancel = isRenter && booking && ['requested', 'paid'].includes(booking.status);
   const counterpartId = booking ? (booking.renterId === user?.id ? booking.listerId : booking.renterId) : null;
 
   async function handlePay() {
@@ -34,6 +38,33 @@ export default function BookingDetailsPage() {
 
   async function handleComplete() {
     try { await api.post(`/bookings/${bookingId}/complete`, {}); await loadBooking(); setMessage('Booking marked complete and the deposit escrow was updated.'); setError(''); } catch (err) { setError(err.message); }
+  }
+
+  async function handleDecline() {
+    const reason = window.prompt('Optional: tell the renter why you are declining.');
+    if (reason === null) return;
+    try {
+      await api.post(`/bookings/${bookingId}/decline`, { reason: reason.trim() });
+      await loadBooking();
+      setMessage('Booking request declined.');
+      setError('');
+    } catch (err) { setError(err.message); }
+  }
+
+  async function handleCancel() {
+    const wasPaid = booking?.status === 'paid';
+    const confirmMessage = wasPaid
+      ? 'Cancel this paid booking? The full amount including the deposit will be refunded.'
+      : 'Cancel this booking request?';
+    if (!window.confirm(confirmMessage)) return;
+    const reason = window.prompt('Optional: leave a note for the lister.');
+    if (reason === null) return;
+    try {
+      await api.post(`/bookings/${bookingId}/cancel`, { reason: reason.trim() });
+      await loadBooking();
+      setMessage(wasPaid ? 'Booking cancelled and refund issued.' : 'Booking request cancelled.');
+      setError('');
+    } catch (err) { setError(err.message); }
   }
 
   async function handleConditionSubmit(event) {
@@ -87,8 +118,10 @@ export default function BookingDetailsPage() {
             <p><strong>Deposit:</strong> {money(booking.depositAmount)}</p>
             <p><strong>Total charged:</strong> {money(booking.totalAmount)}</p>
             <div className="button-row">
-              {booking.status === 'requested' ? <button className="solid-button" onClick={handlePay}>Pay rental + deposit</button> : null}
+              {isRenter && booking.status === 'requested' ? <button className="solid-button" onClick={handlePay}>Pay rental + deposit</button> : null}
               {canComplete ? <button className="ghost-button" onClick={handleComplete}>Mark returned / complete</button> : null}
+              {canDecline ? <button className="ghost-button danger-button" onClick={handleDecline}>Decline request</button> : null}
+              {canCancel ? <button className="ghost-button danger-button" onClick={handleCancel}>Cancel booking</button> : null}
               <Link className="ghost-button" to={`/messages?conversationId=${booking.conversationId}`}>Open messages</Link>
             </div>
           </div>

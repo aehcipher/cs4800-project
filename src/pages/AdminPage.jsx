@@ -24,8 +24,20 @@ export default function AdminPage() {
     }));
   }
 
-  async function updateUserStatus(userId, status) { try { await api.patch(`/admin/users/${userId}`, { status }); await loadAll(); } catch (err) { setError(err.message); } }
-  async function updateListingStatus(listingId, status) { try { await api.patch(`/admin/listings/${listingId}`, { status }); await loadAll(); } catch (err) { setError(err.message); } }
+  const destructiveUserStatuses = { suspended: 'Suspend', banned: 'Ban' };
+  const destructiveListingStatuses = { blocked: 'Block' };
+
+  async function updateUserStatus(user, status) {
+    const verb = destructiveUserStatuses[status];
+    if (verb && !window.confirm(`${verb} ${user.name} (${user.email})? This change is immediate.`)) return;
+    try { await api.patch(`/admin/users/${user.id}`, { status }); await loadAll(); } catch (err) { setError(err.message); }
+  }
+
+  async function updateListingStatus(listing, status) {
+    const verb = destructiveListingStatuses[status];
+    if (verb && !window.confirm(`${verb} the listing "${listing.title}"? It will no longer be visible in browse results.`)) return;
+    try { await api.patch(`/admin/listings/${listing.id}`, { status }); await loadAll(); } catch (err) { setError(err.message); }
+  }
 
   async function resolveDispute(event, disputeId) {
     event.preventDefault();
@@ -34,11 +46,14 @@ export default function AdminPage() {
       setError('Resolution notes are required before resolving a dispute.');
       return;
     }
+    const refundAmount = Number(draft.refundAmount || 0);
+    const refundLine = refundAmount > 0 ? `\nA refund of $${refundAmount.toFixed(2)} will be issued.` : '';
+    if (!window.confirm(`Resolve this dispute and close the booking?${refundLine}`)) return;
     try {
       await api.patch(`/admin/disputes/${disputeId}`, {
         status: 'resolved',
         resolutionNotes: draft.resolutionNotes.trim(),
-        refundAmount: Number(draft.refundAmount || 0)
+        refundAmount
       });
       setResolutionDrafts((current) => {
         const next = { ...current };
@@ -55,8 +70,8 @@ export default function AdminPage() {
       <div><span className="eyebrow">Platform administration</span><h1>Admin dashboard</h1></div>
       {error ? <div className="alert error-alert">{error}</div> : null}
       {summary ? <div className="stats-grid"><div className="stat-card"><span className="stat-label">Users</span><strong className="stat-value">{summary.userCount}</strong></div><div className="stat-card"><span className="stat-label">Listings</span><strong className="stat-value">{summary.listingCount}</strong></div><div className="stat-card"><span className="stat-label">Open disputes</span><strong className="stat-value">{summary.openDisputeCount}</strong></div><div className="stat-card"><span className="stat-label">Gross payments</span><strong className="stat-value">{money(summary.totalProcessed)}</strong></div></div> : null}
-      <div className="panel page-stack"><h2>Users</h2>{users.map((user) => <div key={user.id} className="row-card"><div><strong>{user.name}</strong><p className="muted">{user.email} · {user.role} · {user.status}</p></div><div className="row-card-actions"><button className="ghost-button" onClick={() => updateUserStatus(user.id, 'active')}>Activate</button><button className="ghost-button" onClick={() => updateUserStatus(user.id, 'suspended')}>Suspend</button><button className="ghost-button danger-button" onClick={() => updateUserStatus(user.id, 'banned')}>Ban</button></div></div>)}</div>
-      <div className="panel page-stack"><h2>Listings</h2>{listings.map((listing) => <div key={listing.id} className="row-card"><div><strong>{listing.title}</strong><p className="muted">{listing.category} · {listing.campus} · {dateOnly(listing.createdAt)}</p></div><div className="row-card-actions"><span className="chip">{listing.status}</span><button className="ghost-button" onClick={() => updateListingStatus(listing.id, 'active')}>Approve</button><button className="ghost-button danger-button" onClick={() => updateListingStatus(listing.id, 'blocked')}>Block</button></div></div>)}</div>
+      <div className="panel page-stack"><h2>Users</h2>{users.map((user) => <div key={user.id} className="row-card"><div><strong>{user.name}</strong><p className="muted">{user.email} · {user.role} · {user.status}</p></div><div className="row-card-actions"><button className="ghost-button" onClick={() => updateUserStatus(user, 'active')}>Activate</button><button className="ghost-button" onClick={() => updateUserStatus(user, 'suspended')}>Suspend</button><button className="ghost-button danger-button" onClick={() => updateUserStatus(user, 'banned')}>Ban</button></div></div>)}</div>
+      <div className="panel page-stack"><h2>Listings</h2>{listings.map((listing) => <div key={listing.id} className="row-card"><div><strong>{listing.title}</strong><p className="muted">{listing.category} · {listing.campus} · {dateOnly(listing.createdAt)}</p></div><div className="row-card-actions"><span className="chip">{listing.status}</span><button className="ghost-button" onClick={() => updateListingStatus(listing, 'active')}>Approve</button><button className="ghost-button danger-button" onClick={() => updateListingStatus(listing, 'blocked')}>Block</button></div></div>)}</div>
       <div className="panel page-stack">
         <h2>Disputes</h2>
         {!disputes.length ? <p className="muted">No disputes to review.</p> : null}
